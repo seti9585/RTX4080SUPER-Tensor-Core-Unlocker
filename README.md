@@ -1,222 +1,346 @@
 # RTX 4080 SUPER Tensor Core Unlocker
 
-English | [日本語](#日本語)
+**English** | [日本語](#日本語)
 
-Unlock Tensor Core performance before Windows starts, restore display through the native NVIDIA GOP, and use the same tested RTX 4080 SUPER for display and compute without an integrated or secondary GPU.
+A UEFI application that unlocks Tensor Core performance on a **tested RTX 4080 SUPER** before Windows starts.
 
-The application uses the GPU's own native display firmware to restore the screen after unlocking. It reads and decompresses the GOP from the GPU's Option ROM and verifies it before asking you to proceed. A Windows setup tool downloads the required source archives, extracts or generates the runtime firmware, and verifies each file before placing it on the boot drive.
+After the unlock and GPU reset, it restores the display using the NVIDIA GOP from **the same GPU's own Option ROM**, then starts Windows. On the tested system, **one RTX 4080 SUPER handles both display and compute**—no integrated graphics or second GPU is required.
 
-## Tested scope
+In measured dense matrix multiplication, the unlocked GPU achieved approximately **1.7–2.0× FP16/BF16/FP8 throughput**, depending on the workload. This is **not** a measured Stable Diffusion or application-level speedup.
 
-| Item | Tested configuration |
-|---|---|
-| GPU | ZOTAC RTX 4080 SUPER 16 GB, AD103 |
+```text
+                        Normal boot     Unlocked       Speedup
+FP16  4096 x 4096         91.45         167.19 TFLOPS   1.83x
+BF16  4096 x 4096         96.18         167.77 TFLOPS   1.74x
+FP8   4096 x 4096        179.85         360.22 TFLOPS   2.00x
+```
+
+These numbers are from the tested hardware, not a general performance guarantee. See [Benchmarks](#benchmarks) for the measurement method and all results.
+
+## What it does
+
+- **Unlock before Windows boots.** Checks the required hardware and firmware conditions, performs the unlock, and verifies the resulting state.
+- **Recover the display on the same GPU.** After a GPU function-level reset (FLR), loads the native NVIDIA GOP to restore video output and continue to Windows.
+- **No bundled NVIDIA firmware payloads.** The EFI retrieves the GOP from the GPU's Option ROM at boot. A Windows setup tool locally obtains, extracts or generates the five required runtime firmware files.
+- **Check before changing hardware state.** GPU identity, ROM/GOP hashes, runtime assets, PCI resources, driver ownership and DMA cleanup are checked. The hardware attempt requires an explicit **`U`** confirmation.
+- **Boot from removable media.** No VBIOS flashing or installation into the internal EFI System Partition is required.
+
+## Tested configuration
+
+| Item | Verified environment |
+| --- | --- |
+| GPU | ZOTAC GeForce RTX 4080 SUPER 16 GB (AD103) |
 | PCI device / subsystem | `10de:2702` / `19da:4702` |
-| System BIOS | 3607 on the tested machine; the version number alone does not identify a compatible motherboard |
-| OS / NVIDIA driver | Windows 10 Pro 22H2 64-bit / 616.92 |
-| Display | Same GPU for display and compute; no additional GPU used |
-| Boot media | FAT32-formatted USB flash drive, x64 UEFI |
-| Secure Boot | Disabled; the application refuses an enabled state |
+| System BIOS | Version 3607 on the tested PC; this number alone does not identify a compatible motherboard |
+| Operating system | Windows 10 Pro 22H2, 64-bit |
+| NVIDIA driver | 616.92 |
+| Display | Single RTX 4080 SUPER; no integrated or secondary GPU |
+| Boot device | Writable FAT32 USB SSD, x64 UEFI |
+| Secure Boot | **Disabled** (the EFI refuses to proceed when enabled) |
 
-Compatibility remains tied to the pinned GPU, Option ROM and firmware/driver profiles. Dynamic extraction does not add support for other RTX 4080 SUPER boards, VBIOS versions, other GPUs or operating systems.
+**Compatibility is deliberately narrow.** The program checks specific GPU, Option ROM and firmware/driver profiles. Another RTX 4080 SUPER board, VBIOS, motherboard, GPU model or operating system has **not** been validated. Matching the product name alone is not sufficient.
 
-Before unlocking, the application checks the GPU identity, ROM and GOP hashes, executable structure, PCI resources, ownership and DMA state. The boot screen displays `EXPERIMENTAL ARM` and requires explicit confirmation before changing GPU state.
+## Installation
 
-## Package and setup
+### 1. Prepare the USB drive
 
-Requirements for setup: Windows, Python **3.12 or newer** with the `py` launcher, and `zstandard==0.25.0`. The batch launcher installs that dependency into a private `.setup-venv` when preparation requires it. Read-only inspection and verification do not create that environment. Python and the CUDA Toolkit are not required to execute the prepared EFI.
+Download the repository with **Code → Download ZIP**, or clone it.
 
-1. Extract the package and verify files against `SHA256SUMS.txt`.
-2. Back up existing boot files. Copy `EFI/` and `RTX4080-EXPERIMENT/` to the intended FAT32-formatted USB flash drive's root.
-3. Inspect the selected drive. `X:` below is an example drive letter, not a required one:
+You need **Windows**, **Python 3.12 or newer** and the Windows **`py` launcher** to prepare the runtime assets. `prepare-assets.bat` installs `zstandard==0.25.0` into a private `.setup-venv` when needed. Python and CUDA are **not** required to run the prepared EFI.
+
+Use a writable **FAT32** USB drive. **Back up any existing boot files before copying anything.** Copy the repository's `EFI` and `RTX4080-EXPERIMENT` folders to the **root** of the intended USB drive. This does not require formatting the drive or modifying the PC's internal boot partition.
+
+Initially, `RTX4080-EXPERIMENT/ASSETS` contains only `.gitkeep`; the five runtime files are prepared in the next step.
+
+### 2. Identify the correct drive
+
+Open a command prompt in the extracted repository folder. Replace `X:\` with the USB drive's actual root path:
 
 ```bat
 prepare-assets.bat --inspect-target X:\
 ```
 
-4. Check the displayed GUID, label, filesystem, EFI path and SHA-256 against the intended drive. After reviewing the upstream terms below, explicitly confirm the displayed GUID to prepare and deploy:
+Check the displayed **volume GUID, label, filesystem, EFI path and EFI SHA-256**. The setup tool does not rely on a fixed personal drive GUID or volume label. It rejects the system volume and requires FAT32 and the exact release EFI.
+
+### 3. Prepare and install the firmware locally
+
+Review the [upstream terms](#license--ライセンス), then use the GUID displayed by the inspection command:
 
 ```bat
 prepare-assets.bat --target X:\ --confirm-volume-guid "GUID_FROM_INSPECTION" --accept-terms
 ```
 
-The setup requires FAT32, the explicitly confirmed volume GUID and the exact release EFI hash. The system drive and aliases of its volume are refused. There is no fixed personal GUID or required volume label. Identity is rechecked before replacement.
+The tool obtains the specified source archives, checks their hashes, extracts or generates the required firmware and verifies the final five files before installing them.
 
-All five matching files cause acquisition, generation, backup and copying to be skipped. If some files are missing, only those files are added; existing mismatched files are refused. Staged copies and final files are verified. Recoverable failures remove newly added files and preserve existing ones. If the volume identity is lost or changes, the tool stops without further target writes; staging files may require manual review on the original volume. Power-loss recovery is not guaranteed.
+- If **all five** existing files already match, acquisition and copying are skipped.
+- If only some are missing, **only the missing files** are added.
+- Existing files with **unexpected hashes are not overwritten**.
+- The target volume is rechecked before writes. Recoverable failures remove newly added files; power-loss recovery is not guaranteed.
 
-For already downloaded pinned archives:
+**Offline preparation**, using previously cached archives with the pinned hashes:
 
 ```bat
 prepare-assets.bat --target X:\ --confirm-volume-guid "GUID_FROM_INSPECTION" --offline --cache local\cache
 ```
 
-The batch launcher's dependency installation can still need network access on first use. To verify files only, with no deployment:
+The first-time Python dependency installation may still need network access.
+
+**Verify the five files without deploying anything:**
 
 ```bat
 prepare-assets.bat --verify-only X:\RTX4080-EXPERIMENT\ASSETS
 ```
 
-After setup, the runtime layout is:
+After successful preparation, the USB layout is:
 
 ```text
-EFI/BOOT/BOOTX64.EFI
-EFI/RTX4080SUPER-TENSOR-CORE-UNLOCKER.EFI
-RTX4080-EXPERIMENT/ASSETS/booter_load_ad102.bin
-RTX4080-EXPERIMENT/ASSETS/gsp_boot_ad102.bin
-RTX4080-EXPERIMENT/ASSETS/gsp_boot_desc_ad102.bin
-RTX4080-EXPERIMENT/ASSETS/gsp_ga10x.bin
-RTX4080-EXPERIMENT/ASSETS/v67-ad102-610.43.03-four-plm.bin
+X:\
+├─ EFI\
+│  ├─ BOOT\
+│  │  └─ BOOTX64.EFI
+│  └─ RTX4080SUPER-TENSOR-CORE-UNLOCKER.EFI
+└─ RTX4080-EXPERIMENT\
+   └─ ASSETS\
+      ├─ booter_load_ad102.bin
+      ├─ gsp_boot_ad102.bin
+      ├─ gsp_boot_desc_ad102.bin
+      ├─ gsp_ga10x.bin
+      └─ v67-ad102-610.43.03-four-plm.bin
 ```
 
-Do not rename runtime directories or assets. Keep generated firmware, downloaded archives and caches for your own use; see the license section before redistributing third-party material.
+Do not rename these runtime paths. The five firmware files, downloaded archives, caches and locally extracted GOP images are **not included in the repository**.
 
-## Boot and rollback
+## Booting and recovery
 
-Choose the USB flash drive's UEFI entry in the one-time boot menu. GOP preparation must succeed before the confirmation prompt. Press **`U` once** to attempt the unlock; Esc or 30 seconds without confirmation cancels. Full success restores display and hands control to Windows Boot Manager. Check Device Manager before using workloads.
+1. Save your work and select the USB drive's **UEFI** entry from your firmware's one-time boot menu.
+2. The program checks the hardware and prepares the native GOP **before** prompting for an unlock attempt.
+3. If all preflight checks pass, press **`U` once** to proceed. **Esc**, or no confirmation within **30 seconds**, cancels.
+4. On success, the program restores the display and starts Windows Boot Manager. Check the GPU in **Device Manager** before running workloads.
 
-**After a hardware attempt, STOP, failed display recovery or failed Windows boot requires power-off. Do not retry before reviewing the log.** Reports are saved under `RTX4080-EXPERIMENT/RUNxx/REPORT.TXT`. Preflight failure before an attempt is handled separately.
+**Important:** The application changes GPU state and performs a reset. A black screen, freeze or failed boot is possible. If **STOP** appears after the hardware attempt, or display/Windows recovery fails, **power off** and examine the report before retrying.
 
-The EFI does not restore or overwrite its own boot file. Restore preserved boot files manually from Windows if needed. To boot Windows without running the unlocker, choose Windows Boot Manager rather than the USB drive. This is not a VBIOS flashing or permanent-install procedure. Reboot, sleep and other power-state persistence have not been established.
+Reports are saved under `RTX4080-EXPERIMENT/RUNxx/REPORT.TXT` on the USB drive.
 
-Both distributed EFI copies are **1,277,440 bytes**, SHA-256:
+To boot without the unlocker, choose the normal **Windows Boot Manager** instead of the USB drive. Restore any backed-up USB boot files manually if necessary. The application does **not** flash the VBIOS or establish a permanent unlock; behavior across reboot, sleep and other power-state transitions has not been established.
+
+## Benchmarks
+
+The following measurements compare normal Windows startup (October 30, 2026) with startup through the unlocker (November 1, 2026) on the tested system.
+
+| Benchmark | Matrix | Input | Normal (TFLOPS) | Unlocked (TFLOPS) |
+| --- | ---: | --- | ---: | ---: |
+| PyTorch | 4096 | FP16 | 91.45 | 167.19 |
+| PyTorch | 4096 | BF16 | 96.18 | 167.77 |
+| PyTorch | 4096 | FP32 control | 32.48 | 32.76 |
+| PyTorch | 8192 | FP16 | 101.72 | 168.06 |
+| PyTorch | 8192 | BF16 | 101.02 | 172.10 |
+| PyTorch | 8192 | FP32 control | 33.48 | 33.64 |
+| cuBLASLt | 4096 | FP8 E4M3/E4M3 | 179.85 | 360.22 |
+| cuBLASLt | 4096 | FP8 E4M3/E5M2 | 186.78 | 360.10 |
+| cuBLASLt | 4096 | BF16 control | 91.24 | 177.21 |
+| cuBLASLt | 8192 | FP8 E4M3/E4M3 | 200.98 | 360.80 |
+| cuBLASLt | 8192 | FP8 E4M3/E5M2 | 203.70 | 358.77 |
+| cuBLASLt | 8192 | BF16 control | 102.96 | 196.97 |
+
+**Measurement conditions**
+
+- **PyTorch:** Python 3.12.10, PyTorch `2.11.0+cu128`, CUDA runtime 12.8; dense `torch.mm`, TF32 disabled.
+- **Native FP8:** Separate C++/CUDA program, CUDA Toolkit 13.0, cuBLASLt reported version 130100, SM 8.9. FP8 inputs E4M3/E4M3 or E4M3/E5M2, BF16 output, FP32 compute, scale 1, fast accumulation disabled, TN column-major. FP8 algorithm ID 35; BF16 control ID 21. Executable and cuBLASLt DLL hashes matched between comparisons.
+- **Timing:** 8 warm-up calls, followed by 7 samples of 15 calls, using CUDA Events. Results are medians of time per call.
+- **Correctness checks:** All 12 cases passed finite-output checks and sampled reference comparisons (1 element for PyTorch, 16 for native CUDA).
+
+**Limits:** These results measure **dense matrix throughput**, not Stable Diffusion generation speed, full-model accuracy or full-matrix numerical equivalence. GPU clocks, temperature, power and competing workloads were not fixed. Repeated-boot performance varied, and the cause of that variation has not been established. Long-term stability and broad hardware compatibility remain untested; unlock registers were not independently read back from Windows.
+
+## Release files and building from source
+
+Both included EFI copies have the same content:
 
 ```text
-b6e0ecea47b8ca2d8b17c742d3960e60016a792d0b86fa86cefc13a72a1fcb35
+File size: 1,277,440 bytes
+SHA-256:   b6e0ecea47b8ca2d8b17c742d3960e60016a792d0b86fa86cefc13a72a1fcb35
 ```
 
-## Measurements
+See [`SHA256SUMS.txt`](SHA256SUMS.txt) for the repository file hashes.
 
-Python **3.12.10**, PyTorch **2.11.0+cu128**, CUDA runtime **12.8**, NVIDIA driver **616.92**. PyTorch used dense square `torch.mm` with TF32 disabled. FP8 was a separate native C++/CUDA test: CUDA Toolkit **13.0**, cuBLASLt reported version **130100**, SM 8.9, E4M3/E4M3 or E4M3/E5M2 input, BF16 output, FP32 compute, scale 1, fast accumulation disabled, TN column-major. Algorithm IDs: FP8 35, BF16 control 21. The FP8 executable and DLL hashes matched between comparisons.
-
-Both suites used 8 warm-up calls, followed by 7 samples of 15 calls, measured with CUDA Events using the median time per call. Normal-boot results were measured on October 30, 2026; unlocked results below were measured on November 1, 2026 on the same system.
-
-| Suite | Size | Input type | Normal TFLOPS | Unlocked TFLOPS |
-|---|---:|---|---:|---:|
-| PyTorch | 4096 | float16 | 91.45 | 167.19 |
-| PyTorch | 4096 | bfloat16 | 96.18 | 167.77 |
-| PyTorch | 4096 | float32 | 32.48 | 32.76 |
-| PyTorch | 8192 | float16 | 101.72 | 168.06 |
-| PyTorch | 8192 | bfloat16 | 101.02 | 172.10 |
-| PyTorch | 8192 | float32 | 33.48 | 33.64 |
-| cuBLASLt | 4096 | E4M3_E4M3 | 179.85 | 360.22 |
-| cuBLASLt | 4096 | E4M3_E5M2 | 186.78 | 360.10 |
-| cuBLASLt | 4096 | BF16_CONTROL | 91.24 | 177.21 |
-| cuBLASLt | 8192 | E4M3_E4M3 | 200.98 | 360.80 |
-| cuBLASLt | 8192 | E4M3_E5M2 | 203.70 | 358.77 |
-| cuBLASLt | 8192 | BF16_CONTROL | 102.96 | 196.97 |
-
-All 12 cases passed output checks: finite outputs plus one reference element for PyTorch, and 16 reference elements for native CUDA. This is not full-matrix accuracy validation. Clocks, temperature, power and competing workloads were not fixed, so differences between boots are not attributed to a specific cause. These are dense-matrix TFLOPS, not sparse peak specifications or measured image-generation speedups. Long-duration stability, broad hardware compatibility, full-model accuracy and image equivalence remain outside these tests. The unlock registers were not read directly from Windows.
-
-## Corresponding source
-
-`source/` and `build-efi.ps1` provide the corresponding source and build instructions for the distributed EFI. A rebuild from the distributed production source with Zig **0.14.1** reproduced the distributed EFI byte-for-byte. No firmware assets or extracted GOP are required to compile it.
+The corresponding production source is included under [`source/`](source/) with [`build-efi.ps1`](build-efi.ps1). Rebuilding with **Zig 0.14.1** reproduced the distributed EFI byte-for-byte:
 
 ```powershell
 .\build-efi.ps1 -Zig 'C:\path\to\zig.exe'
 ```
 
-The output is `build/DYNAMIC-GOP-CANDIDATE.EFI`; the build does not deploy or execute it. `source/test-dynamic.ps1` is a host-test helper requiring separately held, pinned fixtures. No such binary fixtures are included.
+The build writes an EFI file under `build/` without deploying or executing it. No NVIDIA firmware assets or extracted GOP are needed to compile the EFI.
 
 ---
 
 # 日本語
 
-Windows起動前にTensor Core性能を解除し、Native NVIDIA GOPで画面表示を復帰するUEFIアプリケーションです。検証構成では、追加GPUや内蔵GPUなしで、同じRTX 4080 SUPERからWindowsの表示・演算まで動作しました。
+Windows起動前に、**RTX 4080 SUPERのTensor Core性能制限を解除するUEFIアプリケーション**です。
 
-GPU自身の表示用ファームウェアを利用し、解除後に画面を復帰します。GPUのOption ROMからGOPを読み出して展開し、実行確認前に検証します。必要な実行用ファームウェアは、Windows上のセットアップツールで取得・抽出・生成し、ファイルの整合性を確認して起動媒体に配置します。
+解除後はGPUをリセットし、そのGPU自身のOption ROMに収録されている**NVIDIA純正GOP**を使って画面を復帰させ、Windowsを起動します。実機検証では、**内蔵GPUや予備のグラフィックボードを使わず、RTX 4080 SUPERの1枚だけで画面表示と演算を両立**できました。
+
+密行列積の実測では、FP16・BF16・FP8の演算性能が、条件により**約1.7～2.0倍**になりました。ただし、これは**Stable Diffusionの画像生成速度を測定した結果ではありません**。
+
+```text
+                        通常起動       解除後         倍率
+FP16  4096 x 4096       91.45        167.19 TFLOPS   1.83倍
+BF16  4096 x 4096       96.18        167.77 TFLOPS   1.74倍
+FP8   4096 x 4096      179.85        360.22 TFLOPS   2.00倍
+```
+
+測定条件と全12項目の数値は、後述の[性能測定](#性能測定)に掲載しています。
+
+## 主な機能
+
+- **Windows起動前に解除：** GPUとファームウェアの状態を確認し、解除処理を実行して結果を照合します。
+- **GPU単独で画面を復帰：** FLR（GPUの機能単位リセット）後にNative NVIDIA GOPを読み込み、画面表示を復帰してWindowsへ引き渡します。
+- **NVIDIA由来のファームウェア本体を非同梱：** GOPは起動時にGPU自身のROMから取得します。必要な外部5ファイルは、利用者のWindows上で取得・抽出・生成します。
+- **異常時は処理を中断：** GPU識別情報、ROM/GOPのハッシュ、必要ファイル、PCI資源、デバイス所有権、DMAの後始末などを検査します。解除には明示的な**`U`キー確認**が必要です。
+- **USBから一時起動：** VBIOSの書き換えや、内蔵ディスクのEFIシステムパーティションへのインストールは不要です。
 
 ## 対応確認済み環境
 
-ZOTAC RTX 4080 SUPER 16 GB / AD103、PCI `10de:2702`、subsystem `19da:4702`、検証機BIOS 3607、Windows 10 Pro 22H2 64-bit、NVIDIAドライバ616.92。起動媒体にはFAT32でフォーマットしたUSBメモリを使用し、x64 UEFIで起動します。Secure Bootは無効にします。BIOSの番号だけで対応マザーボードを特定することはできません。
+| 項目 | 実機検証した構成 |
+| --- | --- |
+| GPU | ZOTAC GeForce RTX 4080 SUPER 16GB（AD103） |
+| PCI device / subsystem | `10de:2702` / `19da:4702` |
+| システムBIOS | 検証機のバージョン3607（番号だけで対応マザーボードを特定できるわけではありません） |
+| OS | Windows 10 Pro 22H2、64-bit |
+| NVIDIAドライバ | 616.92 |
+| 画面表示 | RTX 4080 SUPERのみ。内蔵GPU・追加GPUなし |
+| 起動媒体 | 書き込み可能なFAT32のUSB SSD、x64 UEFI |
+| Secure Boot | **無効**（有効状態ではEFIが実行を拒否します） |
 
-対応するGPU・VBIOS・ファームウェアを照合し、ROMとGOPのハッシュ、実行形式、PCI資源・DMA・所有権を検査します。同じRTX 4080 SUPERでも、別ボードや別VBIOSでの動作を保証するものではありません。起動画面には`EXPERIMENTAL ARM`と表示され、GPUの状態を変更する前に実行確認を求めます。
+**動作条件は限定的です。** GPU名だけでなく、Option ROMやファームウェア・ドライバの固有条件も照合します。同じRTX 4080 SUPERでも、別メーカー・別VBIOS・異なる環境での動作は確認していません。
 
-## 導入
+## 導入方法
 
-セットアップにはWindows、Python **3.12以降**と`py`ランチャーが必要です。バッチは必要時に専用環境へ`zstandard==0.25.0`を導入します。読み取り専用の確認では専用環境を作成しません。EFIの起動自体にはPythonやCUDA Toolkitは不要です。
+### 1. USB起動媒体を用意する
 
-1. 展開後、`SHA256SUMS.txt`と照合します。
-2. 既存の起動ファイルをバックアップし、`EFI`と`RTX4080-EXPERIMENT`を目的のFAT32 USBメモリのルートへコピーします。
-3. 次のコマンドで対象を表示します。`X:`は例であり、使用するドライブ文字へ置き換えます。
+GitHubの**Code → Download ZIP**からダウンロードして展開するか、リポジトリをcloneします。
+
+外部ファームウェアの準備には、**Windows、Python 3.12以降、`py`ランチャー**が必要です。`prepare-assets.bat`は、必要に応じて専用環境`.setup-venv`を作成し、`zstandard==0.25.0`を導入します。準備済みEFIの**実行自体にPythonやCUDAは不要**です。
+
+FAT32形式の書き込み可能なUSB媒体を用意してください。**既存の起動ファイルはコピー前にバックアップしてください。** リポジトリ内の`EFI`と`RTX4080-EXPERIMENT`を、使用するUSBの**ルート**にコピーします。USBのフォーマットや内蔵ディスクの起動領域の変更は不要です。
+
+この時点では`RTX4080-EXPERIMENT/ASSETS`に`.gitkeep`しかなく、外部ファームウェア5ファイルは次の手順で準備します。
+
+### 2. USBを識別する
+
+展開したフォルダーでコマンドプロンプトを開きます。`X:\`を実際のUSBドライブ文字に置き換えて実行してください。
 
 ```bat
 prepare-assets.bat --inspect-target X:\
 ```
 
-4. 表示されたGUID・ラベル・FAT32・EFIパス・EFIのSHA-256を確認します。上流の利用条件を確認したうえで、表示されたGUIDを明示して実行します。
+表示された**ボリュームGUID、ラベル、ファイルシステム、EFIの場所、SHA-256**を確認します。個人固有のGUIDや特定のボリュームラベルは固定されていません。ツールはシステムドライブを拒否し、FAT32と配布EFIのハッシュを照合します。
+
+### 3. ファームウェアを取得・生成して配置する
+
+末尾の[利用条件](#license--ライセンス)と取得元を確認したうえで、手順2で表示されたGUIDを指定します。
 
 ```bat
 prepare-assets.bat --target X:\ --confirm-volume-guid "表示されたGUID" --accept-terms
 ```
 
-利用者が指定したGUID、FAT32、配布EFIのハッシュが一致した場合だけ配置します。個人固有GUIDや特定のラベルは固定していません。システムドライブとその別名を拒否し、書き込み直前にも再照合します。
+必要な原本を取得してハッシュを確認し、外部5ファイルを抽出・生成します。生成したファイルも照合してからUSBへ配置します。
 
-5ファイルが一致済みなら取得・生成・バックアップ・コピーを省略します。一部不足なら不足分だけ配置し、既存の不一致ファイルを自動上書きしません。コピー前後に照合し、復元可能な途中エラーでは今回追加したファイルを取り除きます。媒体の識別が変わったり取得できなくなった場合は、それ以上書き込まず停止します。その場合、元の媒体の一時ファイルを確認する必要があります。停電・切断時まで復元を保証するものではありません。
+- **5ファイルすべて一致済み：** ダウンロード・生成・コピーを省略します。
+- **不足ファイルがある：** 不足分だけを追加します。
+- **既存ファイルのハッシュが違う：** 自動上書きせずに停止します。
+- **配置中の異常：** 書き込み前に媒体を再確認します。復元可能な失敗では新規追加分を取り除きますが、停電や媒体切断からの完全復旧は保証しません。
 
-取得済みの固定アーカイブを使う場合：
+**原本アーカイブを取得済みの場合（オフライン準備）：**
 
 ```bat
 prepare-assets.bat --target X:\ --confirm-volume-guid "表示されたGUID" --offline --cache local\cache
 ```
 
-初回の依存パッケージ導入には別途ネット接続が必要な場合があります。検証だけを行う場合：
+初回のPython依存パッケージ導入にはネット接続が必要な場合があります。
+
+**配置済み5ファイルの照合だけを行う場合：**
 
 ```bat
 prepare-assets.bat --verify-only X:\RTX4080-EXPERIMENT\ASSETS
 ```
 
-セットアップ後の配置は英語セクションの構成図を参照してください。実行用フォルダー名・ファイル名は変更しないでください。取得・生成したファイルを第三者へ配布する場合は、末尾のライセンスに関する説明を確認してください。
-
-## 起動と切り戻し
-
-一時起動メニューからUSBメモリのUEFI起動を選びます。GOP準備が成功した後の確認画面で`U`を1回押すと、解除・FLR・GOP復帰を実行してWindowsへ引き渡します。Esc、または30秒間確認しない場合はキャンセルします。WindowsでGPUが正常認識されていることを確認してください。
-
-**実行開始後のSTOP・画面復帰失敗・Windows起動失敗では電源を切り、記録確認前に再試行しないでください。** ログは`RTX4080-EXPERIMENT/RUNxx/REPORT.TXT`へ保存します。実行前の検査失敗は別の終了経路です。
-
-EFI自身による起動ファイルの自動復元は行いません。必要ならWindowsから保全済み起動ファイルを手動復元します。アンロッカーを使わず通常起動する場合は、USBではなくWindows Boot Managerを選びます。VBIOSを書き換える導入手順ではなく、再起動・スリープ等をまたぐ効果の維持は検証していません。
-
-2つの配布EFIは同一で、サイズは**1,277,440バイト**、SHA-256は次の値です。
+準備後のUSB内の構成は次のとおりです。
 
 ```text
-b6e0ecea47b8ca2d8b17c742d3960e60016a792d0b86fa86cefc13a72a1fcb35
+X:\
+├─ EFI\
+│  ├─ BOOT\
+│  │  └─ BOOTX64.EFI
+│  └─ RTX4080SUPER-TENSOR-CORE-UNLOCKER.EFI
+└─ RTX4080-EXPERIMENT\
+   └─ ASSETS\
+      ├─ booter_load_ad102.bin
+      ├─ gsp_boot_ad102.bin
+      ├─ gsp_boot_desc_ad102.bin
+      ├─ gsp_ga10x.bin
+      └─ v67-ad102-610.43.03-four-plm.bin
 ```
 
-## 実測結果
+実行用のフォルダー名・ファイル名は変更しないでください。**完成済みのNVIDIAファームウェア5ファイルや抽出済みGOPは、リポジトリに同梱していません。**
 
-Python **3.12.10** / PyTorch **2.11.0+cu128** / PyTorch CUDA **12.8** / NVIDIA driver **616.92**。PyTorchは`torch.mm`による正方密行列積、TF32無効です。
+## 起動方法・復旧方法
 
-FP8は別のC++/CUDAプログラムで、CUDA Toolkit **13.0**、cuBLASLt報告バージョン**130100**、SM 8.9。入力E4M3/E4M3またはE4M3/E5M2、出力BF16、演算FP32、scale 1、fast accumulation無効、TN column-major。algorithm IDはFP8が35、BF16対照が21です。比較間でFP8実行ファイルとDLLのハッシュ一致を確認しました。
+1. 作業中のファイルを保存し、PCの一時起動メニューからUSBの**UEFI起動**を選びます。
+2. GPUの識別・状態検査とNative GOPの準備が実行されます。いずれかに失敗した場合、解除処理へ進みません。
+3. 確認画面で**`U`を1回**押すと解除を実行します。**Esc**または**30秒間操作しない場合**はキャンセルします。
+4. 正常終了すると画面表示を復帰し、Windows Boot Managerへ引き渡します。起動後、デバイスマネージャーでGPUの状態を確認してください。
 
-両測定ともウォームアップ8回、15回ずつ7区間をCUDA Eventで測り、1回当たり時間の中央値を使用しました。通常起動は2026年10月30日、解除後は2026年11月1日に同じ構成で測定した値です。
+**重要：** GPUの状態変更とリセットを行うため、画面消失・フリーズ・起動失敗の可能性があります。解除処理開始後に`STOP`が出た場合や画面・Windowsの復帰に失敗した場合は、**電源を切り、ログを確認するまで再試行しないでください。**
 
-| 測定 | サイズ | 入力精度 | 通常 TFLOPS | 解除後 TFLOPS |
-|---|---:|---|---:|---:|
-| PyTorch | 4096 | float16 | 91.45 | 167.19 |
-| PyTorch | 4096 | bfloat16 | 96.18 | 167.77 |
-| PyTorch | 4096 | float32 | 32.48 | 32.76 |
-| PyTorch | 8192 | float16 | 101.72 | 168.06 |
-| PyTorch | 8192 | bfloat16 | 101.02 | 172.10 |
-| PyTorch | 8192 | float32 | 33.48 | 33.64 |
-| cuBLASLt | 4096 | E4M3_E4M3 | 179.85 | 360.22 |
-| cuBLASLt | 4096 | E4M3_E5M2 | 186.78 | 360.10 |
-| cuBLASLt | 4096 | BF16_CONTROL | 91.24 | 177.21 |
-| cuBLASLt | 8192 | E4M3_E4M3 | 200.98 | 360.80 |
-| cuBLASLt | 8192 | E4M3_E5M2 | 203.70 | 358.77 |
-| cuBLASLt | 8192 | BF16_CONTROL | 102.96 | 196.97 |
+実行ログはUSBの`RTX4080-EXPERIMENT/RUNxx/REPORT.TXT`に保存されます。
 
-全12条件で出力検査に合格しました。全出力の有限値と、PyTorchは1要素、ネイティブCUDAは16要素の参照値を確認しています。行列全要素の高精度一致検査ではありません。温度・クロック・電力・他プロセス負荷は固定しておらず、起動間の差の原因は特定していません。数値は密行列積の換算性能で、疎行列の公称値や画像生成速度とは区別してください。
+通常のWindows起動に戻す場合は、USBではなく**Windows Boot Manager**を選びます。USB上の起動ファイルを戻す場合は、保存したバックアップからWindows上で手動復元してください。本ツールはVBIOSを書き換えず、恒久的な解除を行うものでもありません。再起動・スリープ等をまたぐ解除状態の維持は未検証です。
 
-長時間安定性、広範な機種互換性、モデル全体の精度、生成画像の同等性は別の評価です。Windows上で解除レジスタを直接読み直した測定ではありません。
+## 性能測定
 
-## 対応ソース
+以下は、検証機における**通常起動（2026年10月30日）**と**本ツールによる解除後（2026年11月1日）**の実測結果です。
 
-`source/`と`build-efi.ps1`に、配布EFIの対応ソースとビルド手順を収録しています。Zig **0.14.1**で配布する製品側ソースから再ビルドし、配布EFIとのバイト一致を確認しました。コンパイルに純正ファームウェアや抽出済みGOPは不要です。
+| 測定 | 行列サイズ | 入力精度 | 通常起動 TFLOPS | 解除後 TFLOPS |
+| --- | ---: | --- | ---: | ---: |
+| PyTorch | 4096 | FP16 | 91.45 | 167.19 |
+| PyTorch | 4096 | BF16 | 96.18 | 167.77 |
+| PyTorch | 4096 | FP32対照 | 32.48 | 32.76 |
+| PyTorch | 8192 | FP16 | 101.72 | 168.06 |
+| PyTorch | 8192 | BF16 | 101.02 | 172.10 |
+| PyTorch | 8192 | FP32対照 | 33.48 | 33.64 |
+| cuBLASLt | 4096 | FP8 E4M3/E4M3 | 179.85 | 360.22 |
+| cuBLASLt | 4096 | FP8 E4M3/E5M2 | 186.78 | 360.10 |
+| cuBLASLt | 4096 | BF16対照 | 91.24 | 177.21 |
+| cuBLASLt | 8192 | FP8 E4M3/E4M3 | 200.98 | 360.80 |
+| cuBLASLt | 8192 | FP8 E4M3/E5M2 | 203.70 | 358.77 |
+| cuBLASLt | 8192 | BF16対照 | 102.96 | 196.97 |
+
+**測定条件**
+
+- **PyTorch：** Python 3.12.10、PyTorch `2.11.0+cu128`、CUDAランタイム12.8。`torch.mm`による正方密行列積でTF32は無効。
+- **FP8：** 別のC++/CUDAプログラム、CUDA Toolkit 13.0、cuBLASLt報告バージョン130100、SM 8.9。入力E4M3/E4M3またはE4M3/E5M2、出力BF16、演算FP32、scale 1、fast accumulation無効、TN column-major。FP8 algorithm ID 35、BF16対照ID 21。比較間で実行ファイル・cuBLASLt DLLのハッシュ一致を確認。
+- **時間：** ウォームアップ8回、15回ずつ7区間をCUDA Eventで測定し、1回当たりの時間の中央値を採用。
+- **出力：** 全12条件で有限値・参照要素の検査に合格（PyTorchは1要素、CUDAプログラムは16要素）。
+
+**評価範囲：** これは**密行列積の演算性能**であり、Stable Diffusionの生成速度やモデル全体の精度を測った結果ではありません。行列全要素の一致確認も行っていません。クロック・温度・電力・他プロセス負荷は固定しておらず、起動ごとに測定値の変動がありましたが、その原因は未確定です。長時間安定性、別環境への互換性、Windows実行中の解除レジスタの直接読取りも未検証です。
+
+## 配布EFI・ソースコード
+
+配布する2つのEFIは内容が一致しています。
+
+```text
+サイズ：1,277,440バイト
+SHA-256：b6e0ecea47b8ca2d8b17c742d3960e60016a792d0b86fa86cefc13a72a1fcb35
+```
+
+その他のファイルのハッシュは[`SHA256SUMS.txt`](SHA256SUMS.txt)を参照してください。
+
+[`source/`](source/)と[`build-efi.ps1`](build-efi.ps1)に配布EFIの対応ソースとビルド手順を収録しています。**Zig 0.14.1**を使用した再ビルドでは、配布EFIとのバイト単位の一致を確認しています。
 
 ```powershell
 .\build-efi.ps1 -Zig 'C:\path\to\zig.exe'
 ```
 
-出力は`build/DYNAMIC-GOP-CANDIDATE.EFI`です。ビルドは配置や起動を行いません。`source/test-dynamic.ps1`は別途保持する固定入力が必要なホスト試験補助です。その入力バイナリは同梱していません。
+EFIは`build/`に生成されます。ビルドだけではUSBへの配置や実機実行は行いません。コンパイルにNVIDIA純正ファームウェアや抽出済みGOPは不要です。
 
 ---
 
@@ -224,26 +348,26 @@ FP8は別のC++/CUDAプログラムで、CUDA Toolkit **13.0**、cuBLASLt報告�
 
 ## License / ライセンス
 
-See also `source/THIRD_PARTY_NOTICES.md` for provenance, missing historical-notice limitations and the retained upstream firmware notice. Component terms and notices are retained in `LICENSES/` and source headers: GPL-2.0-only, NVIDIA MIT, EDK II BSD-2-Clause-Patent and relevant upstream notices. Setup scripts preserve GPL-2.0-only notices. This is not a single MIT license over the entire package. Python dependencies have their own licenses.
+The included source and third-party components carry **their respective licenses and notices**, not one package-wide MIT license. Refer to [`LICENSES/`](LICENSES/), [`LICENSES/UPSTREAM-FIRMWARE-NOTICE.md`](LICENSES/UPSTREAM-FIRMWARE-NOTICE.md), [`source/THIRD_PARTY_NOTICES.md`](source/THIRD_PARTY_NOTICES.md), and individual source headers. Relevant notices include GPL-2.0-only, NVIDIA MIT and EDK II BSD-2-Clause-Patent. Python dependencies have their own license terms.
 
-各構成要素の条件・表示は`LICENSES/`とソース内に保持しています。配布物全体を一律にMITとするものではありません。セットアップコードのGPLは、取得・生成するNVIDIAファームウェアに同じ権利が及ぶことを意味しません。
+収録ソースと第三者由来の構成要素には、**それぞれのライセンス・権利表示**が適用されます。配布物全体を一律のMITライセンスとして扱うものではありません。詳しくは[`LICENSES/`](LICENSES/)、[`LICENSES/UPSTREAM-FIRMWARE-NOTICE.md`](LICENSES/UPSTREAM-FIRMWARE-NOTICE.md)、[`source/THIRD_PARTY_NOTICES.md`](source/THIRD_PARTY_NOTICES.md)、各ソースファイルの表記を参照してください。
 
-Third-party firmware and the GOP are obtained on the user's computer or GPU. Their acquisition and use remain subject to the applicable terms. `--accept-terms` records the user's review decision for acquisition; it does not grant additional rights. Do not redistribute generated firmware, extracted GOPs or caches based solely on this package's code licenses.
+The five runtime firmware files are prepared on the user's computer; the native GOP is extracted from the user's GPU. **Not bundling them does not establish permission for every acquisition, extraction, use or redistribution.** The `--accept-terms` flag records an acknowledgement of the upstream terms; it does not grant new rights. Do not redistribute firmware, extracted GOP images or caches based solely on this repository's code licenses.
 
-第三者のファームウェアとGOPは、利用者のPCまたはGPU上で取得します。取得・抽出・利用には、それぞれの適用条件を確認してください。`--accept-terms`も新しい権利を与えるものではありません。コードのライセンスだけを根拠に、生成ファームウェアやGOP・キャッシュを再配布しないでください。
+外部ファームウェア5ファイルは利用者のPCで準備し、GOPは利用者のGPUから取得します。ただし、**バイナリを同梱しないことと、取得・抽出・利用・再配布に関する条件がすべて解決していることは別問題**です。`--accept-terms`も追加の権利を与えるものではありません。コード側のライセンスだけを根拠に、生成ファームウェア・抽出GOP・キャッシュを再配布しないでください。
 
 ## Acknowledgements / 謝辞
 
-- [TOTORONG/AD103_win_unlocker](https://huggingface.co/TOTORONG/AD103_win_unlocker): foundation for the existing unlock/recovery integration / 解除・復旧統合の基盤。
-- [Goldlionren/gpu-unlock-4080s](https://github.com/Goldlionren/gpu-unlock-4080s): related implementation consulted during development / 開発時の比較参照。
-- [TianoCore EDK II](https://github.com/tianocore/edk2): UEFI headers and decompression/driver references / UEFIヘッダーと展開・ドライバ処理の参照。
+- [TOTORONG/AD103_win_unlocker](https://huggingface.co/TOTORONG/AD103_win_unlocker) — foundation of the unlock and recovery integration / 解除・復帰処理の基盤。
+- [Goldlionren/gpu-unlock-4080s](https://github.com/Goldlionren/gpu-unlock-4080s) — related RTX 4080 SUPER implementation / RTX 4080 SUPER向けの関連実装。
+- [TianoCore EDK II](https://github.com/tianocore/edk2) — UEFI headers and decompression/driver references / UEFIヘッダーや展開・ドライバ処理の参照。
 
-Their supported environments and measurements are separate from this release's evidence. / 各プロジェクトの対応環境・測定値は本配布物の実機結果とは別です。
+The projects above have their own supported configurations and test results; these should not be confused with this release's measurements. / 各プロジェクトの対応環境や測定結果は、本プロジェクトの実機測定とは別です。
 
-## Acquisition and references / 取得元・典拠
+## Firmware sources and references / 取得元・典拠
 
-- [NVIDIA 610.43.03 source archive](https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-610.43.03.tar.xz): source of three AD102 boot assets; archive and source-member hashes are pinned in the setup code / 3つのAD102アセットの元データ。アーカイブと個別ソースのハッシュを固定。
-- [CachyOS nvidia-utils 610.43.03-1 archive](https://archive.cachyos.org/archive/cachyos-v3/nvidia-utils-610.43.03-1-x86_64_v3.pkg.tar.zst): downstream package containing the pinned NVIDIA GSP firmware; archive hash and extracted bytes are checked / 固定したNVIDIA GSPファームウェアを含む下流パッケージ。原本と抽出後の両方を照合。
-- V67: locally generated by the existing `ad102_payload.payload()` function, not downloaded as an upstream binary / 既存関数でローカル生成し、完成済みバイナリの取得は行いません。
-- [NVIDIA Driver License Agreement](https://www.nvidia.com/en-us/drivers/nvidia-license/) and [upstream license policy](https://huggingface.co/TOTORONG/AD103_win_unlocker/blob/51df9c1/LICENSE-POLICY.md): review the terms applicable to your inputs and use; these links do not assert universal permission / 利用する入力や用途に適用される条件を確認してください。一律の許諾を示すリンクではありません。
-- [PyTorch torch.mm](https://docs.pytorch.org/docs/stable/generated/torch.mm.html), [NVIDIA cuBLAS documentation](https://docs.nvidia.com/cuda/cublas/index.html): benchmark API references, not sources of the measured speedups / 測定APIの資料であり、本配布物の性能向上率の出典ではありません。
+- [NVIDIA kernel-module source 610.43.03](https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-610.43.03.tar.xz) — source archive for three AD102 boot assets / AD102起動用3ファイルの取得元。
+- [CachyOS nvidia-utils 610.43.03-1](https://archive.cachyos.org/archive/cachyos-v3/nvidia-utils-610.43.03-1-x86_64_v3.pkg.tar.zst) — pinned archive containing the NVIDIA GSP firmware / NVIDIA GSPファームウェアの取得元。
+- **V67** — generated locally by `ad102_payload.payload()`; the completed binary is not downloaded / 既存関数でローカル生成し、完成済みバイナリは取得しません。
+- [NVIDIA Driver License Agreement](https://www.nvidia.com/en-us/drivers/nvidia-license/) and [upstream license policy](https://huggingface.co/TOTORONG/AD103_win_unlocker/blob/51df9c1/LICENSE-POLICY.md) — terms to review, not a blanket grant of redistribution permission / 適用条件の参照先であり、包括的な再配布許諾を示すものではありません。
+- [PyTorch `torch.mm`](https://docs.pytorch.org/docs/stable/generated/torch.mm.html) and [NVIDIA cuBLAS documentation](https://docs.nvidia.com/cuda/cublas/index.html) — benchmark API references; the performance figures above are from this project's saved measurements / 測定APIの参照先。性能数値は本プロジェクトの保存済み実測値です。
