@@ -1,0 +1,6 @@
+/* Generated only after pinned evidence validation. */
+#ifndef GU_EXPERIMENTAL_VERIFIED_H
+#define GU_EXPERIMENTAL_VERIFIED_H
+#define GU_EXPERIMENTAL_EVIDENCE_VERIFIED 1
+#define GU_EXPERIMENTAL_EVIDENCE_SHA256 "2b263ecf4e94e8574e0622f9878f16ce7f63c3854177f7bbbad97fa462d3a041"
+#endif

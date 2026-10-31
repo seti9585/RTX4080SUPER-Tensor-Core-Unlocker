@@ -1,0 +1,11 @@
+Distribution summary added 2026-11-01; the historical PORT-NOTES.txt was not present in the preserved release input.
+
+Production changes from the successful embedded-GOP baseline:
+- Remove native_gop_image.h.
+- Add extract_gop.c from the non-mutating Phase 3 probe.
+- native_gop.c: use verified runtime-decompressed bytes and retain their lifetime; log extraction stage and EFI_STATUS before confirmation.
+- Preserve app.c, unlock transaction, FLR, PCI/DMA/ownership checks and handoff implementation.
+
+The corresponding diagnostic-update source rebuilds to B6E0ECEA47B8CA2D8B17C742D3960E60016A792D0B86FA86CEFC13A72A1FCB35 with Zig 0.14.1. RUN02/RUN03 deployment evidence applies to this diagnostic build, not its earlier candidate.
+
+See THIRD_PARTY_NOTICES.md for retained provenance and licensing review limits. This summary does not assert reproduction of missing historical notices or universal legal permission.

@@ -1,0 +1,14 @@
+local/
+.setup-venv/
+cache/
+build/
+__pycache__/
+*.pyc
+*.tmp
+RTX4080-EXPERIMENT/ASSETS/*
+!RTX4080-EXPERIMENT/ASSETS/.gitkeep
+RTX4080-EXPERIMENT/RUN*/
+*.bin
+*.rom
+*.tar.xz
+*.tar.zst
