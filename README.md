@@ -15,7 +15,7 @@ The application uses the GPU's own native display firmware to restore the screen
 | System BIOS | 3607 on the tested machine; the version number alone does not identify a compatible motherboard |
 | OS / NVIDIA driver | Windows 10 Pro 22H2 64-bit / 616.92 |
 | Display | Same GPU for display and compute; no additional GPU used |
-| Boot media | Writable FAT32 USB SSD, x64 UEFI |
+| Boot media | FAT32-formatted USB flash drive, x64 UEFI |
 | Secure Boot | Disabled; the application refuses an enabled state |
 
 Compatibility remains tied to the pinned GPU, Option ROM and firmware/driver profiles. Dynamic extraction does not add support for other RTX 4080 SUPER boards, VBIOS versions, other GPUs or operating systems.
@@ -27,7 +27,7 @@ Before unlocking, the application checks the GPU identity, ROM and GOP hashes, e
 Requirements for setup: Windows, Python **3.12 or newer** with the `py` launcher, and `zstandard==0.25.0`. The batch launcher installs that dependency into a private `.setup-venv` when preparation requires it. Read-only inspection and verification do not create that environment. Python and the CUDA Toolkit are not required to execute the prepared EFI.
 
 1. Extract the package and verify files against `SHA256SUMS.txt`.
-2. Back up existing boot files. Copy `EFI/` and `RTX4080-EXPERIMENT/` to the intended FAT32 USB drive's root.
+2. Back up existing boot files. Copy `EFI/` and `RTX4080-EXPERIMENT/` to the intended FAT32-formatted USB flash drive's root.
 3. Inspect the selected drive. `X:` below is an example drive letter, not a required one:
 
 ```bat
@@ -40,7 +40,7 @@ prepare-assets.bat --inspect-target X:\
 prepare-assets.bat --target X:\ --confirm-volume-guid "GUID_FROM_INSPECTION" --accept-terms
 ```
 
-The setup requires FAT32, the explicitly confirmed volume GUID and the exact release EFI hash. The system drive and aliases of its volume are refused. There is no fixed personal GUID or required volume label. A USB SSD may report as a fixed disk; removable status alone is not the eligibility test. Identity is rechecked before replacement.
+The setup requires FAT32, the explicitly confirmed volume GUID and the exact release EFI hash. The system drive and aliases of its volume are refused. There is no fixed personal GUID or required volume label. Identity is rechecked before replacement.
 
 All five matching files cause acquisition, generation, backup and copying to be skipped. If some files are missing, only those files are added; existing mismatched files are refused. Staged copies and final files are verified. Recoverable failures remove newly added files and preserve existing ones. If the volume identity is lost or changes, the tool stops without further target writes; staging files may require manual review on the original volume. Power-loss recovery is not guaranteed.
 
@@ -72,7 +72,7 @@ Do not rename runtime directories or assets. Keep generated firmware, downloaded
 
 ## Boot and rollback
 
-Choose the USB SSD's UEFI entry in the one-time boot menu. GOP preparation must succeed before the confirmation prompt. Press **`U` once** to attempt the unlock; Esc or 30 seconds without confirmation cancels. Full success restores display and hands control to Windows Boot Manager. Check Device Manager before using workloads.
+Choose the USB flash drive's UEFI entry in the one-time boot menu. GOP preparation must succeed before the confirmation prompt. Press **`U` once** to attempt the unlock; Esc or 30 seconds without confirmation cancels. Full success restores display and hands control to Windows Boot Manager. Check Device Manager before using workloads.
 
 **After a hardware attempt, STOP, failed display recovery or failed Windows boot requires power-off. Do not retry before reviewing the log.** Reports are saved under `RTX4080-EXPERIMENT/RUNxx/REPORT.TXT`. Preflight failure before an attempt is handled separately.
 
@@ -127,7 +127,7 @@ GPU自身の表示用ファームウェアを利用し、解除後に画面を�
 
 ## 対応確認済み環境
 
-ZOTAC RTX 4080 SUPER 16 GB / AD103、PCI `10de:2702`、subsystem `19da:4702`、検証機BIOS 3607、Windows 10 Pro 22H2 64-bit、NVIDIAドライバ616.92。書き込み可能なFAT32 USB SSDからx64 UEFI起動し、Secure Bootは無効にします。BIOSの番号だけで対応マザーボードを特定することはできません。
+ZOTAC RTX 4080 SUPER 16 GB / AD103、PCI `10de:2702`、subsystem `19da:4702`、検証機BIOS 3607、Windows 10 Pro 22H2 64-bit、NVIDIAドライバ616.92。起動媒体にはFAT32でフォーマットしたUSBメモリを使用し、x64 UEFIで起動します。Secure Bootは無効にします。BIOSの番号だけで対応マザーボードを特定することはできません。
 
 対応するGPU・VBIOS・ファームウェアを照合し、ROMとGOPのハッシュ、実行形式、PCI資源・DMA・所有権を検査します。同じRTX 4080 SUPERでも、別ボードや別VBIOSでの動作を保証するものではありません。起動画面には`EXPERIMENTAL ARM`と表示され、GPUの状態を変更する前に実行確認を求めます。
 
@@ -136,7 +136,7 @@ ZOTAC RTX 4080 SUPER 16 GB / AD103、PCI `10de:2702`、subsystem `19da:4702`、�
 セットアップにはWindows、Python **3.12以降**と`py`ランチャーが必要です。バッチは必要時に専用環境へ`zstandard==0.25.0`を導入します。読み取り専用の確認では専用環境を作成しません。EFIの起動自体にはPythonやCUDA Toolkitは不要です。
 
 1. 展開後、`SHA256SUMS.txt`と照合します。
-2. 既存の起動ファイルをバックアップし、`EFI`と`RTX4080-EXPERIMENT`を目的のFAT32 USBのルートへコピーします。
+2. 既存の起動ファイルをバックアップし、`EFI`と`RTX4080-EXPERIMENT`を目的のFAT32 USBメモリのルートへコピーします。
 3. 次のコマンドで対象を表示します。`X:`は例であり、使用するドライブ文字へ置き換えます。
 
 ```bat
@@ -149,7 +149,7 @@ prepare-assets.bat --inspect-target X:\
 prepare-assets.bat --target X:\ --confirm-volume-guid "表示されたGUID" --accept-terms
 ```
 
-利用者が指定したGUID、FAT32、配布EFIのハッシュが一致した場合だけ配置します。個人固有GUIDや特定のラベルは固定していません。システムドライブとその別名を拒否し、書き込み直前にも再照合します。USB SSDが固定ディスクとして認識されることだけでは拒否しません。
+利用者が指定したGUID、FAT32、配布EFIのハッシュが一致した場合だけ配置します。個人固有GUIDや特定のラベルは固定していません。システムドライブとその別名を拒否し、書き込み直前にも再照合します。
 
 5ファイルが一致済みなら取得・生成・バックアップ・コピーを省略します。一部不足なら不足分だけ配置し、既存の不一致ファイルを自動上書きしません。コピー前後に照合し、復元可能な途中エラーでは今回追加したファイルを取り除きます。媒体の識別が変わったり取得できなくなった場合は、それ以上書き込まず停止します。その場合、元の媒体の一時ファイルを確認する必要があります。停電・切断時まで復元を保証するものではありません。
 
@@ -169,7 +169,7 @@ prepare-assets.bat --verify-only X:\RTX4080-EXPERIMENT\ASSETS
 
 ## 起動と切り戻し
 
-一時起動メニューからUSB SSDのUEFI起動を選びます。GOP準備が成功した後の確認画面で`U`を1回押すと、解除・FLR・GOP復帰を実行してWindowsへ引き渡します。Esc、または30秒間確認しない場合はキャンセルします。WindowsでGPUが正常認識されていることを確認してください。
+一時起動メニューからUSBメモリのUEFI起動を選びます。GOP準備が成功した後の確認画面で`U`を1回押すと、解除・FLR・GOP復帰を実行してWindowsへ引き渡します。Esc、または30秒間確認しない場合はキャンセルします。WindowsでGPUが正常認識されていることを確認してください。
 
 **実行開始後のSTOP・画面復帰失敗・Windows起動失敗では電源を切り、記録確認前に再試行しないでください。** ログは`RTX4080-EXPERIMENT/RUNxx/REPORT.TXT`へ保存します。実行前の検査失敗は別の終了経路です。
 
